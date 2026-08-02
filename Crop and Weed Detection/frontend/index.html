@@ -1,0 +1,1098 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SesameVision — Field Analysis Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        fontFamily: {
+          display: ['Space Grotesk', 'sans-serif'],
+          sans: ['Inter', 'sans-serif'],
+          mono: ['JetBrains Mono', 'monospace'],
+        },
+      },
+    },
+  };
+</script>
+<style>
+  :root {
+    --weed: #fb3c5c;
+    --weed-glow: #ff5c7a;
+    --crop: #22e08f;
+    --crop-glow: #4dffb0;
+    --disease: #ffb020;
+    --disease-glow: #ffcb5c;
+    --violet: #a78bfa;
+    --cyan: #22d3ee;
+    --pink: #f472b6;
+    --debris: #94a3b8;
+  }
+  body {
+    background: linear-gradient(135deg, #2a1660 0%, #3d1f6e 18%, #1e3a6e 38%, #0f4c5c 58%, #0f5c4a 78%, #1a2a52 100%);
+    background-attachment: fixed;
+    background-image:
+      radial-gradient(ellipse 1000px 700px at 10% -5%, rgba(167,139,250,0.55), transparent 60%),
+      radial-gradient(ellipse 900px 800px at 105% 5%, rgba(34,224,143,0.42), transparent 55%),
+      radial-gradient(ellipse 800px 800px at 45% 115%, rgba(34,211,238,0.40), transparent 60%),
+      radial-gradient(ellipse 700px 600px at 80% 90%, rgba(244,114,182,0.30), transparent 55%),
+      linear-gradient(135deg, #2a1660 0%, #3d1f6e 18%, #1e3a6e 38%, #0f4c5c 58%, #0f5c4a 78%, #1a2a52 100%);
+  }
+  .bg-noise { background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.05) 1px, transparent 0); background-size: 22px 22px; }
+  .glass { background: rgba(40, 30, 70, 0.42); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.14); }
+  .glass-hover { transition: all .25s cubic-bezier(.4,0,.2,1); }
+  .glass-hover:hover { border-color: rgba(167,139,250,0.35); box-shadow: 0 0 0 1px rgba(167,139,250,0.1), 0 12px 32px -12px rgba(167,139,250,0.25); transform: translateY(-2px); }
+
+  .grad-title {
+    background: linear-gradient(100deg, #fff 20%, var(--violet) 55%, var(--cyan) 90%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: #fff; /* solid fallback if background-clip:text is unsupported */
+  }
+  @supports not (background-clip: text) {
+    .grad-title { background: none; -webkit-text-fill-color: unset; color: #fff; }
+  }
+
+  /* Contrast safety net: text sitting directly on the vivid gradient (not inside a
+     .glass card) needs to stay legible regardless of which part of the background
+     it lands on, so we brighten the dimmer slate tones and add a soft shadow. */
+  body { text-shadow: 0 1px 3px rgba(0,0,0,0.35); }
+  .glass, .glass * { text-shadow: none; }
+  .text-slate-600 { color: #b6c0d4 !important; }
+  .text-slate-500 { color: #c7d0e2 !important; }
+  .text-slate-400 { color: #d7deee !important; }
+  .text-slate-300 { color: #e6eaf5 !important; }
+  .grad-border { position: relative; }
+  .grad-border::before {
+    content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1.5px;
+    background: linear-gradient(120deg, var(--violet), var(--cyan), var(--crop), var(--disease), var(--weed), var(--violet));
+    background-size: 300% 300%;
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+    animation: borderflow 6s linear infinite; pointer-events: none;
+  }
+  @keyframes borderflow { 0%{background-position:0% 50%} 100%{background-position:300% 50%} }
+
+  .drop-zone { transition: all .3s cubic-bezier(.4,0,.2,1); }
+  .drop-zone.drag-over { border-color: var(--crop); background: rgba(34,224,143,0.08); transform: scale(1.008); box-shadow: 0 0 60px -10px rgba(34,224,143,0.35); }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2e2650; border-radius: 4px; }
+
+  @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .pulse-dot { animation: pulse-dot 1.5s ease-in-out infinite; }
+  @keyframes scan { 0%{transform:translateY(-120%)} 100%{transform:translateY(220%)} }
+  .scan-line { animation: scan 1.6s linear infinite; }
+  @keyframes fadeUp { from{opacity:0; transform:translateY(10px)} to{opacity:1; transform:translateY(0)} }
+  .fade-in { animation: fadeUp .45s cubic-bezier(.16,1,.3,1); }
+  @keyframes popIn { from{opacity:0; transform:scale(.9)} to{opacity:1; transform:scale(1)} }
+  .pop-in { animation: popIn .3s cubic-bezier(.34,1.56,.64,1); }
+  @keyframes floaty { 0%,100%{transform:translateY(0px)} 50%{transform:translateY(-6px)} }
+  .float { animation: floaty 4s ease-in-out infinite; }
+  @keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+  .shimmer-bar { background-image: linear-gradient(90deg, transparent, rgba(255,255,255,.5), transparent); background-size: 200% 100%; animation: shimmer 1.8s linear infinite; }
+  @keyframes spinSlow { to { transform: rotate(360deg); } }
+  .spin-slow { animation: spinSlow 14s linear infinite; }
+  @keyframes ringPulse { 0%{box-shadow:0 0 0 0 rgba(255,176,32,.5)} 70%{box-shadow:0 0 0 14px rgba(255,176,32,0)} 100%{box-shadow:0 0 0 0 rgba(255,176,32,0)} }
+  .ring-pulse { animation: ringPulse 1.8s cubic-bezier(.4,0,.6,1) infinite; }
+
+  .legend-chip { transition: all .18s ease; cursor: pointer; user-select: none; }
+  .legend-chip:hover { transform: translateY(-1px); }
+  .legend-chip.off { opacity: .35; filter: grayscale(.6); }
+
+  .box-tooltip { pointer-events: none; max-width: 220px; line-height: 1.4; }
+
+  .det-row { cursor: pointer; transition: background .15s ease, transform .15s ease; border-radius: 8px; }
+  .det-row:hover { background: rgba(255,255,255,0.07); transform: translateX(2px); }
+  .det-row.selected { background: rgba(167,139,250,0.16); }
+  .det-row.sprayed { opacity: .45; }
+
+  input[type="range"] { -webkit-appearance: none; background: transparent; }
+  input[type="range"]::-webkit-slider-runnable-track { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.12); }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; margin-top: -5px; width: 15px; height: 15px; border-radius: 50%; background: var(--violet); box-shadow: 0 0 8px rgba(167,139,250,0.7); cursor: pointer; }
+  input[type="range"]::-moz-range-track { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.12); }
+  input[type="range"]::-moz-range-thumb { width: 15px; height: 15px; border: none; border-radius: 50%; background: var(--violet); box-shadow: 0 0 8px rgba(167,139,250,0.7); cursor: pointer; }
+</style>
+</head>
+<body class="bg-noise text-slate-200 font-sans min-h-screen overflow-x-hidden">
+
+<!-- Floating ambient orbs -->
+<div class="fixed -z-10 top-[-10%] left-[-5%] w-[460px] h-[460px] rounded-full bg-violet-400/35 blur-[100px] float"></div>
+<div class="fixed -z-10 top-[15%] right-[-8%] w-[420px] h-[420px] rounded-full bg-emerald-400/30 blur-[100px] float" style="animation-delay:-2s"></div>
+<div class="fixed -z-10 bottom-[-15%] left-[25%] w-[540px] h-[540px] rounded-full bg-cyan-400/28 blur-[120px] float" style="animation-delay:-1s"></div>
+<div class="fixed -z-10 bottom-[10%] right-[10%] w-[360px] h-[360px] rounded-full bg-pink-400/25 blur-[100px] float" style="animation-delay:-3s"></div>
+<div class="fixed -z-10 top-[45%] left-[45%] w-[300px] h-[300px] rounded-full bg-amber-400/20 blur-[100px] float" style="animation-delay:-4s"></div>
+
+<div class="max-w-[1400px] mx-auto px-6 py-8 relative">
+
+  <!-- Header -->
+  <header class="flex flex-wrap items-center justify-between gap-4 mb-8">
+    <div class="flex items-center gap-3">
+      <div class="relative w-11 h-11 rounded-2xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-emerald-400 flex items-center justify-center shadow-lg shadow-violet-500/30">
+        <div class="absolute inset-0 rounded-2xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-emerald-400 blur-md opacity-60 -z-10"></div>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c4.97 0 9-4.03 9-9-4.97 0-9 4.03-9 9Z"/><path d="M12 22C7.03 22 3 17.97 3 13c4.97 0 9 4.03 9 9Z"/><path d="M12 13c0-5 4-9 9-9-0 5-4 9-9 9Z"/><path d="M12 13C12 8 8 4 3 4c0 5 4 9 9 9Z"/><path d="M12 13v9"/></svg>
+      </div>
+      <div>
+        <h1 class="font-display font-extrabold text-2xl grad-title tracking-tight">SesameVision</h1>
+        <p class="text-xs text-slate-400 font-mono">CPU-optimized field analysis</p>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2 glass rounded-full px-3 py-1.5 text-xs">
+        <span id="mode-dot" class="w-1.5 h-1.5 rounded-full pulse-dot" style="background: var(--disease)"></span>
+        <span id="mode-label" class="font-mono text-slate-300">Demo mode (simulated inference)</span>
+      </div>
+      <button id="toggle-backend" class="glass glass-hover rounded-full px-4 py-1.5 text-xs font-medium text-slate-200 hover:text-white transition-colors">
+        Try live backend
+      </button>
+      <button id="toggle-accurate" class="hidden glass glass-hover rounded-full px-4 py-1.5 text-xs font-medium text-slate-200 hover:text-white transition-colors items-center gap-1.5">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg>
+        Accurate mode: off
+      </button>
+    </div>
+  </header>
+
+  <div class="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-6">
+
+    <!-- Left: upload / viewer -->
+    <div class="space-y-6">
+
+      <!-- Drop zone -->
+      <div id="drop-zone" class="drop-zone glass rounded-2xl border-2 border-dashed border-violet-400/30 p-14 text-center cursor-pointer relative overflow-hidden">
+        <div class="absolute -top-10 -right-10 w-40 h-40 rounded-full bg-gradient-to-br from-cyan-400/20 to-violet-500/20 blur-2xl spin-slow"></div>
+        <input type="file" id="file-input" accept="image/*" class="hidden">
+        <div class="flex flex-col items-center gap-4 relative">
+          <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500/20 to-emerald-400/20 border border-white/10 flex items-center justify-center">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="url(#g1)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <defs><linearGradient id="g1" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stop-color="#a78bfa"/><stop offset="100%" stop-color="#22e08f"/></linearGradient></defs>
+              <path d="M12 13v8"/><path d="m8 17 4-4 4 4"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+            </svg>
+          </div>
+          <div>
+            <p class="font-display font-semibold text-white text-lg">Drop a field photo here</p>
+            <p class="text-slate-400 text-sm mt-1">or click to browse — JPEG, PNG, WEBP</p>
+          </div>
+          <p class="text-xs text-slate-500 font-mono">512×512 sesame field images work best</p>
+        </div>
+      </div>
+
+      <!-- Viewer -->
+      <div id="viewer-wrap" class="hidden glass rounded-2xl p-4 fade-in grad-border">
+        <div class="flex items-center justify-between mb-3 px-1">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium text-white">Field scan</span>
+            <span id="scan-status" class="text-xs font-mono" style="color: var(--crop-glow)"></span>
+          </div>
+          <div class="flex items-center gap-3">
+            <button id="rescan-btn" class="text-xs font-mono text-cyan-300 hover:text-cyan-200 flex items-center gap-1.5 glass-hover rounded-full px-2.5 py-1">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+              Re-scan
+            </button>
+            <button id="new-image-btn" class="text-xs font-mono text-slate-400 hover:text-white flex items-center gap-1.5">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+              New image
+            </button>
+          </div>
+        </div>
+        <div class="flex items-center gap-3 mb-3 px-1">
+          <span class="text-xs font-mono text-slate-400 whitespace-nowrap">min confidence</span>
+          <input type="range" id="confidence-slider" min="0" max="95" value="0" class="flex-1 accent-violet-400 h-1.5 cursor-pointer">
+          <span id="confidence-slider-val" class="text-xs font-mono w-10 text-right" style="color: var(--cyan)">0%</span>
+        </div>
+        <div class="flex items-center justify-between mb-2 px-1">
+          <span class="text-[11px] font-mono text-slate-500">scroll to zoom · drag to pan when zoomed</span>
+          <button id="zoom-reset-btn" class="hidden text-[11px] font-mono text-cyan-300 hover:text-cyan-200 glass-hover rounded-full px-2 py-0.5">
+            <span id="zoom-level">100%</span> · reset
+          </button>
+        </div>
+        <div class="relative rounded-xl overflow-hidden bg-black" id="canvas-container">
+          <canvas id="image-canvas" class="w-full h-auto block cursor-crosshair" style="transition: transform 0.05s linear;"></canvas>
+          <div id="scan-overlay" class="absolute inset-0 hidden">
+            <div class="scan-line absolute left-0 right-0 h-28 bg-gradient-to-b from-transparent via-emerald-400/25 to-transparent"></div>
+          </div>
+          <div id="box-tooltip" class="box-tooltip hidden absolute glass rounded-lg px-3 py-2 text-xs font-mono text-white z-10 shadow-xl"></div>
+        </div>
+
+        <!-- Interactive legend (click to toggle visibility) -->
+        <div class="flex items-center flex-wrap gap-2 mt-4 px-1 text-xs font-mono">
+          <span class="text-slate-500 mr-1">filter:</span>
+          <button data-cls="weed" class="legend-chip flex items-center gap-1.5 px-2.5 py-1 rounded-full" style="background: rgba(251,60,92,0.14); border: 1px solid rgba(251,60,92,0.35)">
+            <span class="w-2.5 h-2.5 rounded-full" style="background: var(--weed)"></span>Weed
+          </button>
+          <button data-cls="crop_healthy" class="legend-chip flex items-center gap-1.5 px-2.5 py-1 rounded-full" style="background: rgba(34,224,143,0.14); border: 1px solid rgba(34,224,143,0.35)">
+            <span class="w-2.5 h-2.5 rounded-full" style="background: var(--crop)"></span>Healthy crop
+          </button>
+          <button data-cls="crop_diseased" class="legend-chip flex items-center gap-1.5 px-2.5 py-1 rounded-full" style="background: rgba(255,176,32,0.14); border: 1px solid rgba(255,176,32,0.35)">
+            <span class="w-2.5 h-2.5 rounded-full" style="background: var(--disease)"></span>Diseased crop
+          </button>
+          <button data-cls="debris" class="legend-chip off flex items-center gap-1.5 px-2.5 py-1 rounded-full" style="background: rgba(148,163,184,0.14); border: 1px solid rgba(148,163,184,0.35)">
+            <span class="w-2.5 h-2.5 rounded-full" style="background: var(--debris)"></span>Filtered debris</button>
+          <button id="spray-btn" class="legend-chip ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-full text-emerald-200" style="background: rgba(34,224,143,0.14); border: 1px solid rgba(34,224,143,0.35)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 3 9-3 9 19-9Z"/><path d="M6 12h16"/></svg>
+            Simulate targeted spray
+          </button>
+        </div>
+        <div class="flex items-center gap-1.5 mt-2 px-1 text-[11px] font-mono text-slate-500">
+          <kbd class="glass px-1.5 py-0.5 rounded">←</kbd><kbd class="glass px-1.5 py-0.5 rounded">→</kbd>
+          <span>cycle detections · click a box for details</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Right: analysis panel -->
+    <aside class="space-y-4">
+
+      <div class="glass glass-hover rounded-2xl p-5">
+        <h2 class="font-display font-semibold text-white text-sm mb-4 flex items-center gap-2">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--violet)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+          Analysis
+        </h2>
+
+        <div id="analysis-empty" class="text-sm text-slate-500 py-6 text-center">
+          Upload a photo to see detection results
+        </div>
+
+        <div id="analysis-content" class="hidden space-y-5">
+          <div id="disease-callout" class="rounded-xl p-4 border pop-in">
+            <div class="flex items-start justify-between gap-2">
+              <div>
+                <p class="text-xs font-mono text-slate-400 mb-1">Primary finding</p>
+                <p id="disease-label" class="font-display font-bold text-lg text-white"></p>
+              </div>
+              <span id="disease-badge" class="text-[10px] font-mono px-2 py-1 rounded-full whitespace-nowrap"></span>
+            </div>
+            <div class="mt-3">
+              <div class="flex justify-between text-xs font-mono text-slate-400 mb-1">
+                <span>Confidence</span>
+                <span id="disease-confidence-val"></span>
+              </div>
+              <div class="h-2 rounded-full bg-white/5 overflow-hidden relative">
+                <div id="disease-confidence-bar" class="h-full rounded-full transition-all duration-700 relative overflow-hidden" style="background: linear-gradient(90deg, var(--disease), var(--crop))">
+                  <div class="absolute inset-0 shimmer-bar"></div>
+                </div>
+              </div>
+            </div>
+            <p id="disease-note" class="text-[11px] text-slate-500 mt-3 leading-relaxed"></p>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2">
+            <div class="glass glass-hover rounded-xl p-3 text-center">
+              <p id="stat-weeds" class="font-display font-bold text-2xl" style="color: var(--weed-glow)">0</p>
+              <p class="text-[10px] font-mono text-slate-400 mt-0.5">weeds</p>
+            </div>
+            <div class="glass glass-hover rounded-xl p-3 text-center">
+              <p id="stat-crops" class="font-display font-bold text-2xl" style="color: var(--crop-glow)">0</p>
+              <p class="text-[10px] font-mono text-slate-400 mt-0.5">crops</p>
+            </div>
+            <div class="glass glass-hover rounded-xl p-3 text-center">
+              <p id="stat-diseased" class="font-display font-bold text-2xl" style="color: var(--disease-glow)">0</p>
+              <p class="text-[10px] font-mono text-slate-400 mt-0.5">flagged</p>
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            <p class="text-xs font-mono text-slate-400 uppercase tracking-wide">Field telemetry</p>
+
+            <div>
+              <div class="flex justify-between text-xs mb-1">
+                <span class="text-slate-300">Area infested by weeds</span>
+                <span id="tele-weed-pct" class="font-mono" style="color: var(--weed-glow)">0%</span>
+              </div>
+              <div class="h-2 rounded-full bg-white/5 overflow-hidden">
+                <div id="tele-weed-bar" class="h-full rounded-full transition-all duration-700" style="width:0%; background: linear-gradient(90deg, #fb3c5c, #ff5c7a)"></div>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex justify-between text-xs mb-1">
+                <span class="text-slate-300">Diseased crop coverage</span>
+                <span id="tele-disease-pct" class="font-mono" style="color: var(--disease-glow)">0%</span>
+              </div>
+              <div class="h-2 rounded-full bg-white/5 overflow-hidden">
+                <div id="tele-disease-bar" class="h-full rounded-full transition-all duration-700" style="width:0%; background: linear-gradient(90deg, #ffb020, #ffcb5c)"></div>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex justify-between text-xs mb-1">
+                <span class="text-slate-300">Pesticide saved (targeted vs. blanket spray)</span>
+                <span id="tele-saved-pct" class="font-mono" style="color: var(--crop-glow)">0%</span>
+              </div>
+              <div class="h-2 rounded-full bg-white/5 overflow-hidden">
+                <div id="tele-saved-bar" class="h-full rounded-full transition-all duration-700" style="width:0%; background: linear-gradient(90deg, #22e08f, #4dffb0)"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between pt-3 border-t border-white/10 text-[11px] font-mono text-slate-500">
+            <span>Inference time</span>
+            <span id="tele-inference-time">—</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="detections-card" class="hidden glass glass-hover rounded-2xl p-5">
+        <h3 class="font-display font-semibold text-white text-sm mb-3 flex items-center justify-between">
+          <span>Detections</span>
+          <span id="detections-count" class="text-[10px] font-mono text-slate-400"></span>
+        </h3>
+        <div id="detection-list" class="space-y-1 max-h-64 overflow-y-auto pr-1"></div>
+      </div>
+
+      <div id="pipeline-card" class="hidden glass glass-hover rounded-2xl p-5">
+        <h3 class="font-display font-semibold text-white text-sm mb-1 flex items-center gap-2">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3Z"/></svg>
+          False-positive filter pipeline
+        </h3>
+        <p class="text-[11px] text-slate-500 mb-3 leading-relaxed">Every crop detection passes through these gates before it can be labeled diseased — this is what stops dead matter and debris piles from being misread as disease.</p>
+        <div id="pipeline-funnel" class="space-y-2"></div>
+      </div>
+
+      <div class="glass glass-hover rounded-2xl p-5">
+        <h3 class="font-display font-semibold text-white text-sm mb-3">How this works</h3>
+        <ul class="text-xs text-slate-400 space-y-2 leading-relaxed">
+          <li class="flex gap-2"><span class="mt-0.5" style="color: var(--violet)">▸</span>A YOLO11n detector (trained on the 1,300-image sesame crop/weed dataset) localizes crop and weed regions.</li>
+          <li class="flex gap-2"><span class="mt-0.5" style="color: var(--debris)">▸</span>An ExG vegetation gate, a geometry check, and weed-cluster suppression filter out dead matter and debris before disease scoring.</li>
+          <li class="flex gap-2"><span class="mt-0.5" style="color: var(--cyan)">▸</span>Each surviving crop region is passed to a lightweight disease classifier.</li>
+          <li class="flex gap-2"><span class="mt-0.5" style="color: var(--crop)">▸</span>All of this runs CPU-only — no GPU required on the farm.</li>
+        </ul>
+      </div>
+
+    </aside>
+  </div>
+
+  <footer class="mt-10 text-center text-[11px] text-slate-600 font-mono">
+    Demo mode simulates inference locally in your browser. Toggle "live backend" to call a running FastAPI instance at localhost:8000.
+  </footer>
+</div>
+
+<script>
+(() => {
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('file-input');
+  const viewerWrap = document.getElementById('viewer-wrap');
+  const canvas = document.getElementById('image-canvas');
+  const ctx = canvas.getContext('2d');
+  const scanOverlay = document.getElementById('scan-overlay');
+  const scanStatus = document.getElementById('scan-status');
+  const newImageBtn = document.getElementById('new-image-btn');
+  const rescanBtn = document.getElementById('rescan-btn');
+  const toggleBackendBtn = document.getElementById('toggle-backend');
+  const toggleAccurateBtn = document.getElementById('toggle-accurate');
+  const modeDot = document.getElementById('mode-dot');
+  const modeLabel = document.getElementById('mode-label');
+  const boxTooltip = document.getElementById('box-tooltip');
+
+  const analysisEmpty = document.getElementById('analysis-empty');
+  const analysisContent = document.getElementById('analysis-content');
+
+  const confidenceSlider = document.getElementById('confidence-slider');
+  const confidenceSliderVal = document.getElementById('confidence-slider-val');
+  const sprayBtn = document.getElementById('spray-btn');
+  const detectionsCard = document.getElementById('detections-card');
+  const detectionsCount = document.getElementById('detections-count');
+  const detectionList = document.getElementById('detection-list');
+  const pipelineCard = document.getElementById('pipeline-card');
+  const pipelineFunnel = document.getElementById('pipeline-funnel');
+  const zoomResetBtn = document.getElementById('zoom-reset-btn');
+  const zoomLevel = document.getElementById('zoom-level');
+  const canvasContainer = document.getElementById('canvas-container');
+
+  const BACKEND_URL = 'http://localhost:8000/api/analyze';
+  let useLiveBackend = false;
+  let accurateMode = false;
+  let currentImage = null;
+  let currentFile = null;
+  let currentBoxes = [];        // last rendered boxes, in image pixel coords
+  let visibleClasses = new Set(['weed', 'crop_healthy', 'crop_diseased']); // 'debris' starts off
+  let confidenceThreshold = 0;  // percent, live-adjustable
+  let selectedBox = null;
+  let sprayActive = false;
+  let sprayedSet = new Set();   // indices (within currentBoxes) marked as sprayed
+  let zoomScale = 1;
+  let panX = 0, panY = 0;
+  let isPanning = false;
+  let panStart = { x: 0, y: 0 };
+  let dragMoved = false;
+
+  function getFilteredBoxes() {
+    return currentBoxes.filter(b => visibleClasses.has(b.className) && (b.detConfidence * 100) >= confidenceThreshold);
+  }
+
+  // ---------------------------------------------------------------------
+  // Mode toggle
+  // ---------------------------------------------------------------------
+  toggleBackendBtn.addEventListener('click', () => {
+    useLiveBackend = !useLiveBackend;
+    if (useLiveBackend) {
+      modeDot.style.background = 'var(--crop-glow)';
+      modeLabel.textContent = 'Live backend (localhost:8000)';
+      toggleBackendBtn.textContent = 'Use demo mode';
+      toggleAccurateBtn.classList.remove('hidden');
+      toggleAccurateBtn.classList.add('flex');
+    } else {
+      modeDot.style.background = 'var(--disease)';
+      modeLabel.textContent = 'Demo mode (simulated inference)';
+      toggleBackendBtn.textContent = 'Try live backend';
+      toggleAccurateBtn.classList.add('hidden');
+      toggleAccurateBtn.classList.remove('flex');
+    }
+  });
+
+  toggleAccurateBtn.addEventListener('click', () => {
+    accurateMode = !accurateMode;
+    toggleAccurateBtn.lastChild.textContent = accurateMode ? ' Accurate mode: on' : ' Accurate mode: off';
+    toggleAccurateBtn.style.borderColor = accurateMode ? 'rgba(34,224,143,0.5)' : '';
+    toggleAccurateBtn.style.color = accurateMode ? 'var(--crop-glow)' : '';
+  });
+
+  // ---------------------------------------------------------------------
+  // Legend filter toggles
+  // ---------------------------------------------------------------------
+  document.querySelectorAll('.legend-chip[data-cls]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const cls = chip.dataset.cls;
+      if (visibleClasses.has(cls)) {
+        visibleClasses.delete(cls);
+        chip.classList.add('off');
+      } else {
+        visibleClasses.add(cls);
+        chip.classList.remove('off');
+      }
+      if (currentImage) { renderBoxes(currentBoxes, currentImage); renderDetectionList(); }
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Confidence threshold slider — live filtering
+  // ---------------------------------------------------------------------
+  confidenceSlider.addEventListener('input', () => {
+    confidenceThreshold = Number(confidenceSlider.value);
+    confidenceSliderVal.textContent = confidenceThreshold + '%';
+    if (currentImage) { renderBoxes(currentBoxes, currentImage); renderDetectionList(); }
+  });
+
+  // ---------------------------------------------------------------------
+  // Spray simulation — stagger-animate weed boxes as "treated"
+  // ---------------------------------------------------------------------
+  sprayBtn.addEventListener('click', () => {
+    if (!currentImage) return;
+    if (sprayActive) {
+      sprayActive = false;
+      sprayedSet.clear();
+      sprayBtn.innerHTML = sprayBtnLabel(false);
+      renderBoxes(currentBoxes, currentImage);
+      renderDetectionList();
+      return;
+    }
+    sprayActive = true;
+    sprayBtn.innerHTML = sprayBtnLabel(true);
+    const weedIdx = currentBoxes
+      .map((b, i) => ({ b, i }))
+      .filter(({ b }) => b.className === 'weed' && visibleClasses.has('weed') && (b.detConfidence * 100) >= confidenceThreshold)
+      .map(({ i }) => i);
+    sprayedSet.clear();
+    weedIdx.forEach((idx, order) => {
+      setTimeout(() => {
+        sprayedSet.add(idx);
+        renderBoxes(currentBoxes, currentImage);
+        renderDetectionList();
+      }, order * 180);
+    });
+  });
+  function sprayBtnLabel(active) {
+    const icon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 3 9-3 9 19-9Z"/><path d="M6 12h16"/></svg>';
+    return icon + (active ? 'Reset spray sim' : 'Simulate targeted spray');
+  }
+
+  // ---------------------------------------------------------------------
+  // Keyboard navigation — arrow keys cycle through filtered detections
+  // ---------------------------------------------------------------------
+  document.addEventListener('keydown', (e) => {
+    if (!currentImage) return;
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    const list = getFilteredBoxes();
+    if (!list.length) return;
+    e.preventDefault();
+    let idx = selectedBox ? list.indexOf(selectedBox) : -1;
+    idx = e.key === 'ArrowRight' ? (idx + 1) % list.length : (idx - 1 + list.length) % list.length;
+    selectBox(list[idx]);
+  });
+
+  // ---------------------------------------------------------------------
+  // Canvas zoom & pan — scroll to zoom toward cursor, drag to pan when zoomed
+  // ---------------------------------------------------------------------
+  function applyCanvasTransform() {
+    canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomScale})`;
+    if (zoomScale > 1.01) {
+      zoomResetBtn.classList.remove('hidden');
+      zoomLevel.textContent = Math.round(zoomScale * 100) + '%';
+      canvas.style.cursor = isPanning ? 'grabbing' : 'grab';
+    } else {
+      zoomResetBtn.classList.add('hidden');
+      canvas.style.cursor = 'crosshair';
+      panX = 0; panY = 0;
+    }
+  }
+
+  canvasContainer.addEventListener('wheel', (e) => {
+    if (!currentImage) return;
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 0.2 : -0.2;
+    zoomScale = Math.min(4, Math.max(1, zoomScale + delta));
+    applyCanvasTransform();
+  }, { passive: false });
+
+  zoomResetBtn.addEventListener('click', () => {
+    zoomScale = 1; panX = 0; panY = 0;
+    applyCanvasTransform();
+  });
+
+  canvas.addEventListener('mousedown', (e) => {
+    if (zoomScale <= 1.01) return;
+    isPanning = true;
+    dragMoved = false;
+    panStart = { x: e.clientX - panX, y: e.clientY - panY };
+    canvas.style.cursor = 'grabbing';
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!isPanning) return;
+    dragMoved = true;
+    panX = e.clientX - panStart.x;
+    panY = e.clientY - panStart.y;
+    applyCanvasTransform();
+  });
+  window.addEventListener('mouseup', () => {
+    if (isPanning) { isPanning = false; applyCanvasTransform(); }
+  });
+
+  // ---------------------------------------------------------------------
+  // Drag & drop / file input wiring
+  // ---------------------------------------------------------------------
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length) handleFile(e.target.files[0]);
+  });
+  newImageBtn.addEventListener('click', () => {
+    viewerWrap.classList.add('hidden');
+    dropZone.classList.remove('hidden');
+    analysisContent.classList.add('hidden');
+    analysisEmpty.classList.remove('hidden');
+    detectionsCard.classList.add('hidden');
+    pipelineCard.classList.add('hidden');
+    fileInput.value = '';
+    selectedBox = null;
+    sprayActive = false;
+    sprayedSet.clear();
+    sprayBtn.innerHTML = sprayBtnLabel(false);
+    zoomScale = 1; panX = 0; panY = 0;
+    applyCanvasTransform();
+  });
+  rescanBtn.addEventListener('click', () => {
+    if (currentImage) {
+      rescanBtn.classList.add('pointer-events-none', 'opacity-50');
+      runAnalysis(currentFile, currentImage).finally(() => {
+        rescanBtn.classList.remove('pointer-events-none', 'opacity-50');
+      });
+    }
+  });
+
+  function handleFile(file) {
+    if (!file.type.startsWith('image/')) return;
+    currentFile = file;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        currentImage = img;
+        dropZone.classList.add('hidden');
+        viewerWrap.classList.remove('hidden');
+        drawBaseImage(img);
+        runAnalysis(file, img);
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function drawBaseImage(img) {
+    const maxW = 900;
+    const scale = Math.min(1, maxW / img.naturalWidth);
+    canvas.width = img.naturalWidth * scale;
+    canvas.height = img.naturalHeight * scale;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  }
+
+  // ---------------------------------------------------------------------
+  // Analysis orchestration
+  // ---------------------------------------------------------------------
+  async function runAnalysis(file, img) {
+    scanStatus.textContent = 'analyzing...';
+    scanOverlay.classList.remove('hidden');
+    boxTooltip.classList.add('hidden');
+
+    let result;
+    const start = performance.now();
+    try {
+      result = useLiveBackend ? await callLiveBackend(file) : await mockDetection(img);
+    } catch (err) {
+      console.error(err);
+      scanStatus.textContent = 'error — falling back to demo mode';
+      result = await mockDetection(img);
+    }
+    const elapsed = performance.now() - start;
+
+    scanOverlay.classList.add('hidden');
+    scanStatus.textContent = 'complete';
+    setTimeout(() => { scanStatus.textContent = ''; }, 1800);
+
+    currentBoxes = result.boxes;
+    selectedBox = null;
+    sprayActive = false;
+    sprayedSet.clear();
+    sprayBtn.innerHTML = sprayBtnLabel(false);
+    renderBoxes(currentBoxes, img);
+    renderAnalysisPanel(result, elapsed);
+    renderDetectionList();
+    detectionsCard.classList.remove('hidden');
+    if (result.pipelineTrace) {
+      renderPipelineTrace(result.pipelineTrace);
+      pipelineCard.classList.remove('hidden');
+    }
+  }
+
+  async function callLiveBackend(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const url = `${BACKEND_URL}?accurate_mode=${accurateMode}`;
+    const res = await fetch(url, { method: 'POST', body: formData });
+    if (!res.ok) throw new Error(`Backend responded ${res.status}`);
+    const data = await res.json();
+    return {
+      boxes: data.boxes.map(b => ({
+        x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2,
+        className: b.class_name, color: b.color,
+        diseaseLabel: b.disease_label, diseaseConfidence: b.disease_confidence,
+        diseaseMethod: b.disease_method, detConfidence: b.detection_confidence,
+        filterReason: b.filter_reason, vegCoverage: b.veg_coverage,
+        lesionCount: b.lesion_count, avgCircularity: b.avg_circularity, avgBorderContrast: b.avg_border_contrast,
+      })),
+      telemetry: data.telemetry,
+      pipelineTrace: data.pipeline_trace,
+      accurateModeUsed: data.model_status?.accurate_mode ?? false,
+    };
+  }
+
+  function mockDetection(img) {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const w = img.naturalWidth, h = img.naturalHeight;
+        const boxes = [];
+        const numCrops = 4 + Math.floor(Math.random() * 4);
+        const numWeeds = 2 + Math.floor(Math.random() * 4);
+        const diseaseLabels = ['Cercospora Leaf Spot', 'Bacterial Blight'];
+
+        for (let i = 0; i < numCrops; i++) {
+          const bw = w * (0.12 + Math.random() * 0.10);
+          const bh = h * (0.12 + Math.random() * 0.10);
+          const x1 = Math.random() * (w - bw);
+          const y1 = Math.random() * (h - bh);
+          const diseased = Math.random() < 0.32;
+          const label = diseased ? diseaseLabels[Math.floor(Math.random() * diseaseLabels.length)] : 'Healthy';
+          boxes.push({
+            x1, y1, x2: x1 + bw, y2: y1 + bh,
+            className: diseased ? 'crop_diseased' : 'crop_healthy',
+            color: diseased ? '#ffb020' : '#22e08f',
+            diseaseLabel: label,
+            diseaseConfidence: diseased ? (0.6 + Math.random() * 0.35) : (0.75 + Math.random() * 0.24),
+            diseaseMethod: 'heuristic',
+            detConfidence: 0.7 + Math.random() * 0.28,
+            lesionCount: label === 'Cercospora Leaf Spot' ? 1 + Math.floor(Math.random() * 4) : 0,
+            avgCircularity: label === 'Cercospora Leaf Spot' ? +(0.6 + Math.random() * 0.35).toFixed(2) : null,
+            avgBorderContrast: label === 'Cercospora Leaf Spot' ? +(0.5 + Math.random() * 0.5).toFixed(2) : null,
+          });
+        }
+        for (let i = 0; i < numWeeds; i++) {
+          const bw = w * (0.06 + Math.random() * 0.08);
+          const bh = h * (0.06 + Math.random() * 0.08);
+          const x1 = Math.random() * (w - bw);
+          const y1 = Math.random() * (h - bh);
+          boxes.push({
+            x1, y1, x2: x1 + bw, y2: y1 + bh,
+            className: 'weed', color: '#fb3c5c',
+            diseaseLabel: null, diseaseConfidence: null, diseaseMethod: null,
+            detConfidence: 0.65 + Math.random() * 0.3,
+          });
+        }
+
+        const numDebris = Math.random() < 0.7 ? 1 + Math.floor(Math.random() * 3) : 0;
+        const debrisReasons = [
+          { reason: 'low live-vegetation coverage (ExG/Otsu gate) — likely dead matter or bare soil', method: 'veg_gate', veg: () => 0.05 + Math.random() * 0.2 },
+          { reason: 'heavily overlaps a weed cluster — likely an uprooted pile, not a diseased plant', method: 'heuristic', veg: () => 0.3 + Math.random() * 0.15 },
+          { reason: 'geometrically implausible shape/size for a single plant', method: 'heuristic', veg: () => null },
+          { reason: 'ambiguous — top two disease scores too close to trust', method: 'heuristic', veg: () => 0.4 + Math.random() * 0.2 },
+        ];
+        let vegGateCount = 0, geomCount = 0, clusterCount = 0, marginCount = 0;
+        for (let i = 0; i < numDebris; i++) {
+          const bw = w * (0.08 + Math.random() * 0.1);
+          const bh = h * (0.08 + Math.random() * 0.1);
+          const x1 = Math.random() * (w - bw);
+          const y1 = Math.random() * (h - bh);
+          const r = debrisReasons[Math.floor(Math.random() * debrisReasons.length)];
+          if (r.reason.includes('vegetation')) vegGateCount++;
+          else if (r.reason.includes('weed cluster')) clusterCount++;
+          else if (r.reason.includes('geometrically')) geomCount++;
+          else marginCount++;
+          boxes.push({
+            x1, y1, x2: x1 + bw, y2: y1 + bh,
+            className: 'debris', color: '#94a3b8',
+            diseaseLabel: 'Background/Debris', diseaseConfidence: 0.4 + Math.random() * 0.3,
+            diseaseMethod: r.method, detConfidence: 0.4 + Math.random() * 0.35,
+            filterReason: r.reason, vegCoverage: r.veg(),
+          });
+        }
+
+        const totalArea = w * h;
+        const weedArea = boxes.filter(b => b.className === 'weed').reduce((s, b) => s + (b.x2 - b.x1) * (b.y2 - b.y1), 0);
+        const diseasedArea = boxes.filter(b => b.className === 'crop_diseased').reduce((s, b) => s + (b.x2 - b.x1) * (b.y2 - b.y1), 0);
+
+        const totalRaw = numCrops + numWeeds + numDebris;
+        const telemetry = {
+          image_width: w, image_height: h,
+          num_weeds: numWeeds, num_crops: numCrops,
+          num_diseased_crops: boxes.filter(b => b.className === 'crop_diseased').length,
+          num_debris_filtered: numDebris,
+          weed_area_pct: +(100 * weedArea / totalArea).toFixed(2),
+          diseased_crop_area_pct: +(100 * diseasedArea / totalArea).toFixed(2),
+          estimated_pesticide_saved_pct: +(100 * (1 - weedArea / totalArea)).toFixed(2),
+          inference_time_ms: 60 + Math.random() * 120,
+        };
+        const pipelineTrace = {
+          raw_detections: totalRaw,
+          veg_gate_rejected: vegGateCount,
+          geometric_rejected: geomCount,
+          weed_cluster_suppressed: clusterCount,
+          confidence_margin_rejected: marginCount,
+          final_kept: totalRaw - numDebris,
+        };
+
+        resolve({ boxes, telemetry, pipelineTrace });
+      }, 550 + Math.random() * 450);
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Rendering + click-to-inspect
+  // ---------------------------------------------------------------------
+  let screenBoxes = []; // {x,y,w,h,box} in canvas pixel space, for hit-testing
+
+  function renderBoxes(boxes, img) {
+    drawBaseImage(img);
+    screenBoxes = [];
+    const scaleX = canvas.width / img.naturalWidth;
+    const scaleY = canvas.height / img.naturalHeight;
+
+    boxes.forEach((b, idx) => {
+      if (!visibleClasses.has(b.className)) return;
+      if ((b.detConfidence * 100) < confidenceThreshold) return;
+      const x = b.x1 * scaleX, y = b.y1 * scaleY;
+      const w = (b.x2 - b.x1) * scaleX, h = (b.y2 - b.y1) * scaleY;
+      screenBoxes.push({ x, y, w, h, box: b });
+      const sprayed = sprayedSet.has(idx);
+      const isSelected = selectedBox === b;
+
+      ctx.save();
+      if (sprayed) ctx.globalAlpha = 0.35;
+      ctx.shadowColor = b.color;
+      ctx.shadowBlur = isSelected ? 16 : 8;
+      ctx.strokeStyle = b.color;
+      ctx.lineWidth = isSelected ? 3.5 : 2.5;
+      if (b.className === 'debris') { ctx.setLineDash([6, 4]); ctx.globalAlpha = Math.min(ctx.globalAlpha ?? 1, 0.75); }
+      ctx.strokeRect(x, y, w, h);
+      ctx.setLineDash([]);
+      if (isSelected) {
+        ctx.setLineDash([5, 4]);
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#fff';
+        ctx.strokeRect(x - 4, y - 4, w + 8, h + 8);
+        ctx.setLineDash([]);
+      }
+      ctx.restore();
+
+      if (sprayed) {
+        ctx.save();
+        ctx.strokeStyle = '#4dffb0';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(x + w * 0.25, y + h * 0.55);
+        ctx.lineTo(x + w * 0.45, y + h * 0.75);
+        ctx.lineTo(x + w * 0.78, y + h * 0.28);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      const label = b.className === 'weed' ? (sprayed ? 'treated' : 'weed')
+        : b.className === 'debris' ? 'filtered'
+        : (b.className === 'crop_diseased' ? (b.diseaseLabel || 'diseased') : 'healthy');
+      ctx.font = '600 11px "JetBrains Mono", monospace';
+      const textW = ctx.measureText(label).width;
+      ctx.fillStyle = b.color;
+      ctx.fillRect(x, Math.max(0, y - 18), textW + 12, 18);
+      ctx.fillStyle = '#070a12';
+      ctx.fillText(label, x + 6, Math.max(12, y - 5));
+    });
+  }
+
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+    const hit = screenBoxes.find(sb => mx >= sb.x && mx <= sb.x + sb.w && my >= sb.y && my <= sb.y + sb.h);
+    if (hit) {
+      canvas.style.cursor = 'pointer';
+      const b = hit.box;
+      const lines = [
+        b.className === 'weed' ? 'WEED'
+          : b.className === 'debris' ? 'FILTERED — DEBRIS'
+          : (b.className === 'crop_diseased' ? (b.diseaseLabel || 'DISEASED').toUpperCase() : 'HEALTHY CROP'),
+        `detection: ${(b.detConfidence * 100).toFixed(0)}%`,
+      ];
+      if (b.diseaseConfidence != null && b.className !== 'debris') lines.push(`disease conf: ${(b.diseaseConfidence * 100).toFixed(0)}% (${b.diseaseMethod})`);
+      if (b.vegCoverage != null) lines.push(`veg coverage: ${(b.vegCoverage * 100).toFixed(0)}%`);
+      if (b.filterReason) lines.push(b.filterReason);
+      boxTooltip.innerHTML = lines.map((l, i) => `<div class="${i === 0 ? 'font-semibold' : 'text-slate-400'}">${l}</div>`).join('');
+      boxTooltip.classList.remove('hidden');
+      const wrapRect = document.getElementById('canvas-container').getBoundingClientRect();
+      boxTooltip.style.left = Math.min(rect.left - wrapRect.left + (mx * rect.width / canvas.width) + 14, wrapRect.width - 200) + 'px';
+      boxTooltip.style.top = Math.max(0, rect.top - wrapRect.top + (my * rect.height / canvas.height) - 10) + 'px';
+    } else {
+      canvas.style.cursor = 'crosshair';
+      boxTooltip.classList.add('hidden');
+    }
+  });
+  canvas.addEventListener('mouseleave', () => boxTooltip.classList.add('hidden'));
+  canvas.addEventListener('click', (e) => {
+    if (dragMoved) { dragMoved = false; return; }
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+    const hit = screenBoxes.find(sb => mx >= sb.x && mx <= sb.x + sb.w && my >= sb.y && my <= sb.y + sb.h);
+    if (hit) selectBox(hit.box);
+  });
+
+  // ---------------------------------------------------------------------
+  // Selection — syncs canvas highlight, analysis callout, and list row
+  // ---------------------------------------------------------------------
+  function selectBox(b) {
+    selectedBox = b;
+    renderBoxes(currentBoxes, currentImage);
+    focusOnBox(b);
+    renderDetectionList();
+    const row = detectionList.querySelector(`[data-idx="${currentBoxes.indexOf(b)}"]`);
+    if (row) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  // ---------------------------------------------------------------------
+  // Detection list — clickable rows synced with canvas selection
+  // ---------------------------------------------------------------------
+  function renderPipelineTrace(trace) {
+    const stages = [
+      { key: 'raw_detections', label: 'Raw crop/weed detections', color: 'var(--violet)' },
+      { key: 'veg_gate_rejected', label: 'Rejected — vegetation gate', color: 'var(--debris)', negative: true },
+      { key: 'geometric_rejected', label: 'Rejected — geometric check', color: 'var(--debris)', negative: true },
+      { key: 'weed_cluster_suppressed', label: 'Rejected — weed-cluster overlap', color: 'var(--debris)', negative: true },
+      { key: 'confidence_margin_rejected', label: 'Rejected — ambiguous confidence', color: 'var(--debris)', negative: true },
+      { key: 'final_kept', label: 'Final trusted detections', color: 'var(--crop-glow)' },
+    ];
+    const max = Math.max(1, trace.raw_detections);
+    pipelineFunnel.innerHTML = stages.map(s => {
+      const val = trace[s.key] ?? 0;
+      const pct = Math.max(4, Math.round(100 * val / max));
+      return `<div>
+        <div class="flex justify-between text-[11px] mb-1">
+          <span class="${s.negative ? 'text-slate-400' : 'text-slate-200'}">${s.label}</span>
+          <span class="font-mono" style="color:${s.color}">${val}</span>
+        </div>
+        <div class="h-1.5 rounded-full bg-white/5 overflow-hidden">
+          <div class="h-full rounded-full transition-all duration-700" style="width:${pct}%; background:${s.color}"></div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function renderDetectionList() {
+    const filtered = currentBoxes
+      .map((b, idx) => ({ b, idx }))
+      .filter(({ b }) => visibleClasses.has(b.className) && (b.detConfidence * 100) >= confidenceThreshold);
+
+    detectionsCount.textContent = `${filtered.length} shown`;
+
+    if (!filtered.length) {
+      detectionList.innerHTML = '<p class="text-xs text-slate-500 py-3 text-center">No detections match the current filters</p>';
+      return;
+    }
+
+    detectionList.innerHTML = filtered.map(({ b, idx }) => {
+      const label = b.className === 'weed' ? 'Weed'
+        : b.className === 'debris' ? 'Filtered debris'
+        : (b.className === 'crop_diseased' ? (b.diseaseLabel || 'Diseased crop') : 'Healthy crop');
+      const conf = Math.round(b.detConfidence * 100);
+      const sprayed = sprayedSet.has(idx);
+      const selected = selectedBox === b;
+      return `<div class="det-row flex items-center gap-2 px-2 py-1.5 ${selected ? 'selected' : ''} ${sprayed ? 'sprayed' : ''}" data-idx="${idx}">
+        <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:${b.color}"></span>
+        <div class="flex-1 min-w-0">
+          <span class="text-xs text-slate-200 block truncate ${sprayed ? 'line-through' : ''}">${label}</span>
+          ${b.className === 'debris' && b.filterReason ? `<span class="text-[10px] text-slate-500 block truncate">${b.filterReason}</span>` : ''}
+        </div>
+        ${sprayed ? '<i style="color:#4dffb0" class="text-xs">✓</i>' : ''}
+        <span class="text-[11px] font-mono text-slate-500 flex-shrink-0">${conf}%</span>
+      </div>`;
+    }).join('');
+
+    detectionList.querySelectorAll('.det-row').forEach(row => {
+      row.addEventListener('click', () => {
+        const idx = Number(row.dataset.idx);
+        selectBox(currentBoxes[idx]);
+      });
+    });
+  }
+
+  function focusOnBox(b) {
+    const callout = document.getElementById('disease-callout');
+    const label = document.getElementById('disease-label');
+    const badge = document.getElementById('disease-badge');
+    const confVal = document.getElementById('disease-confidence-val');
+    const confBar = document.getElementById('disease-confidence-bar');
+    const note = document.getElementById('disease-note');
+
+    callout.classList.remove('pop-in'); void callout.offsetWidth; callout.classList.add('pop-in');
+
+    if (b.className === 'weed') {
+      label.textContent = 'Weed detected';
+      callout.className = 'rounded-xl p-4 border pop-in';
+      callout.style.borderColor = 'rgba(251,60,92,0.35)';
+      callout.style.background = 'rgba(251,60,92,0.06)';
+      badge.textContent = 'SELECTED';
+      badge.className = 'text-[10px] font-mono px-2 py-1 rounded-full whitespace-nowrap';
+      badge.style.background = 'rgba(251,60,92,0.2)'; badge.style.color = 'var(--weed-glow)';
+      const pct = Math.round(b.detConfidence * 100);
+      confVal.textContent = pct + '%'; confBar.style.width = pct + '%';
+      note.textContent = 'Recommend targeted spot-spray at this location.';
+    } else if (b.className === 'debris') {
+      label.textContent = 'Filtered — not trusted as crop';
+      callout.className = 'rounded-xl p-4 border pop-in';
+      callout.style.borderColor = 'rgba(148,163,184,0.35)';
+      callout.style.background = 'rgba(148,163,184,0.08)';
+      badge.textContent = 'DEBRIS GATE';
+      badge.className = 'text-[10px] font-mono px-2 py-1 rounded-full whitespace-nowrap';
+      badge.style.background = 'rgba(148,163,184,0.2)'; badge.style.color = 'var(--debris)';
+      confVal.textContent = '—'; confBar.style.width = '0%';
+      note.textContent = b.filterReason || 'Rejected by the false-positive filter pipeline before it could reach a disease label.';
+    } else {
+      const diseased = b.className === 'crop_diseased';
+      label.textContent = diseased ? b.diseaseLabel : 'Healthy crop';
+      callout.className = 'rounded-xl p-4 border pop-in';
+      callout.style.borderColor = diseased ? 'rgba(255,176,32,0.35)' : 'rgba(34,224,143,0.35)';
+      callout.style.background = diseased ? 'rgba(255,176,32,0.06)' : 'rgba(34,224,143,0.06)';
+      badge.textContent = b.diseaseMethod === 'cnn' ? 'CNN MODEL' : 'HEURISTIC';
+      badge.className = 'text-[10px] font-mono px-2 py-1 rounded-full whitespace-nowrap';
+      badge.style.background = diseased ? 'rgba(255,176,32,0.2)' : 'rgba(34,224,143,0.2)';
+      badge.style.color = diseased ? 'var(--disease-glow)' : 'var(--crop-glow)';
+      const pct = Math.round((b.diseaseConfidence || 0) * 100);
+      confVal.textContent = pct + '%'; confBar.style.width = pct + '%';
+      if (diseased && b.lesionCount != null && b.lesionCount > 0) {
+        note.textContent = `${b.lesionCount} lesion${b.lesionCount > 1 ? 's' : ''} detected — circularity ${Math.round((b.avgCircularity || 0) * 100)}%, border contrast ${Math.round((b.avgBorderContrast || 0) * 100)}%. Shape/border evidence, not just color.`;
+      } else {
+        note.textContent = diseased
+          ? 'Estimated via color-pattern triage — train the CNN on real labeled data for higher precision.'
+          : 'No stress signals detected in this region.';
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Animated count-up for stat numbers
+  // ---------------------------------------------------------------------
+  function countUp(el, target, duration = 700) {
+    const start = performance.now();
+    const from = 0;
+    function tick(now) {
+      const p = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - p, 3);
+      el.textContent = Math.round(from + (target - from) * eased);
+      if (p < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  function renderAnalysisPanel(result, elapsedMs) {
+    analysisEmpty.classList.add('hidden');
+    analysisContent.classList.remove('hidden');
+
+    const t = result.telemetry;
+    const diseasedBoxes = result.boxes.filter(b => b.className === 'crop_diseased');
+    const primary = diseasedBoxes.length
+      ? diseasedBoxes.sort((a, b) => (b.diseaseConfidence || 0) - (a.diseaseConfidence || 0))[0]
+      : null;
+
+    if (primary) {
+      selectedBox = primary;
+      renderBoxes(currentBoxes, currentImage);
+      focusOnBox(primary);
+      document.getElementById('disease-callout').classList.add('ring-pulse');
+      setTimeout(() => document.getElementById('disease-callout').classList.remove('ring-pulse'), 3600);
+    } else {
+      const callout = document.getElementById('disease-callout');
+      const label = document.getElementById('disease-label');
+      const badge = document.getElementById('disease-badge');
+      const confVal = document.getElementById('disease-confidence-val');
+      const confBar = document.getElementById('disease-confidence-bar');
+      const note = document.getElementById('disease-note');
+      label.textContent = 'No disease detected';
+      callout.className = 'rounded-xl p-4 border pop-in';
+      callout.style.borderColor = 'rgba(34,224,143,0.35)';
+      callout.style.background = 'rgba(34,224,143,0.06)';
+      badge.textContent = 'ALL CLEAR';
+      badge.className = 'text-[10px] font-mono px-2 py-1 rounded-full whitespace-nowrap';
+      badge.style.background = 'rgba(34,224,143,0.2)'; badge.style.color = 'var(--crop-glow)';
+      confVal.textContent = '—'; confBar.style.width = '0%';
+      note.textContent = 'All detected crop regions appear healthy in this scan.';
+    }
+
+    countUp(document.getElementById('stat-weeds'), t.num_weeds);
+    countUp(document.getElementById('stat-crops'), t.num_crops);
+    countUp(document.getElementById('stat-diseased'), t.num_diseased_crops);
+
+    document.getElementById('tele-weed-pct').textContent = t.weed_area_pct + '%';
+    document.getElementById('tele-weed-bar').style.width = Math.min(100, t.weed_area_pct) + '%';
+
+    document.getElementById('tele-disease-pct').textContent = t.diseased_crop_area_pct + '%';
+    document.getElementById('tele-disease-bar').style.width = Math.min(100, t.diseased_crop_area_pct) + '%';
+
+    document.getElementById('tele-saved-pct').textContent = t.estimated_pesticide_saved_pct + '%';
+    document.getElementById('tele-saved-bar').style.width = Math.min(100, t.estimated_pesticide_saved_pct) + '%';
+
+    document.getElementById('tele-inference-time').textContent =
+      (t.inference_time_ms ? t.inference_time_ms.toFixed(0) : elapsedMs.toFixed(0)) + ' ms';
+  }
+})();
+</script>
+
+</body>
+</html>

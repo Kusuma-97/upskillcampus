@@ -1,0 +1,17 @@
+# CPU-only PyTorch (no CUDA) — smaller install, correct for farm/edge hardware
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.3.1+cpu
+torchvision==0.18.1+cpu
+
+ultralytics==8.2.103      # YOLO11n object detector
+opencv-python-headless==4.10.0.84
+Pillow==10.4.0
+numpy==1.26.4
+PyYAML==6.0.2
+scikit-learn==1.5.1       # train/val split, metrics, StratifiedGroupKFold (field_validation.py)
+tqdm==4.66.5
+
+# Optional — only needed if you switch training over to the Albumentations pipeline in
+# augmentations.py per DATA_COLLECTION_BLUEPRINT.md section 3.2. Not required for the
+# default torchvision-based train_disease_classifier.py.
+albumentations==1.4.15
